@@ -107,8 +107,14 @@ const RollProfile rollProfile = RollProfile(
 
 late final MediaParameters defaultParameters;
 
+var _defaultsReady = false;
+
 Future<void> initDefaultParameters() async {
+  // `late final` can only be assigned once, and generateTagFile calls this on
+  // every run. Without the guard the second call in a process throws.
+  if (_defaultsReady) return;
   defaultParameters = payloadToParameters(hexToBytes(rollProfile.template.hex));
+  _defaultsReady = true;
   debugLog(() => 'initDefaultParameters: defaultParameters=${defaultParameters.toMap()}');
 }
 

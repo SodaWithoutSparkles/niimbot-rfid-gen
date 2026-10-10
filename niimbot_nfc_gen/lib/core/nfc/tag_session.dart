@@ -31,6 +31,47 @@ class TagInfo {
   String toString() => 'TagInfo(pageCount: $pageCount, uid: $uid)';
 }
 
+/// What went wrong, in the terms the write runner cares about.
+enum NfcErrorKind {
+  /// Android reports a tag NAK as an `IOException`. The tag is now IDLE and
+  /// needs a revive, but the write can carry on afterwards.
+  comms,
+
+  /// The tag left the field. Fatal, there is nothing left to write to.
+  removed,
+
+  /// No tag polled.
+  noTag,
+
+  /// No NFC adapter on this device.
+  unavailable,
+
+  /// The tag does not support raw transceive.
+  unsupported,
+
+  /// Nothing was presented before the poll timeout.
+  timeout,
+
+  unknown,
+}
+
+/// Every failure a [TagSession] reports comes back as one of these, so the
+/// write runner never has to know which plugin produced it.
+class NfcException implements Exception {
+  final NfcErrorKind kind;
+
+  /// The raw plugin error code, kept for the log. Null for fakes.
+  final String? code;
+
+  final String message;
+
+  const NfcException(this.kind, this.message, {this.code});
+
+  @override
+  String toString() =>
+      'NfcException(${kind.name}${code == null ? '' : ' $code'}): $message';
+}
+
 abstract class TagSession {
   TagInfo get tag;
 

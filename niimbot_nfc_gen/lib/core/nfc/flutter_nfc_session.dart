@@ -12,30 +12,11 @@ import '../log.dart';
 import 'commands.dart';
 import 'tag_session.dart';
 
-/// What went wrong, in the terms the write runner cares about.
-enum NfcErrorKind {
-  /// Android reports a tag NAK as an `IOException`. The tag is now IDLE and
-  /// needs a revive, but the write can carry on afterwards.
-  comms,
-
-  /// The tag left the field. Fatal, there is nothing left to write to.
-  removed,
-
-  /// No tag polled.
-  noTag,
-
-  /// No NFC adapter on this device.
-  unavailable,
-
-  /// The tag does not support raw transceive.
-  unsupported,
-
-  /// Nothing was presented before the poll timeout.
-  timeout,
-
-  unknown,
-}
-
+/// Maps a flutter_nfc_kit `PlatformException` code onto [NfcErrorKind].
+///
+/// The codes come from the plugin's Android sources: 500 Communication error,
+/// 503 Tag already removed, 404 NFC not available, 405 not supported for this
+/// card, 406 No tag polled, 408 Polling tag timeout.
 NfcErrorKind nfcErrorKindFor(String code) => switch (code) {
       '500' => NfcErrorKind.comms,
       '503' => NfcErrorKind.removed,
@@ -46,24 +27,6 @@ NfcErrorKind nfcErrorKindFor(String code) => switch (code) {
       _ => NfcErrorKind.unknown,
     };
 
-class NfcException implements Exception {
-  final NfcErrorKind kind;
-
-  /// The raw `PlatformException` code, for the log.
-  final String? code;
-
-  final String message;
-
-  const NfcException(this.kind, this.message, {this.code});
-
-  /// True when a `revive()` has any chance of helping.
-  bool get isRecoverable => kind == NfcErrorKind.comms;
-
-  @override
-  String toString() =>
-      'NfcException(${kind.name}${code == null ? '' : ' $code'}): $message';
-}
-
 class FlutterNfcSession implements TagSession {
   /// How long to wait for the user to present a tag.
   static const pollTimeout = Duration(seconds: 60);
@@ -71,6 +34,10 @@ class FlutterNfcSession implements TagSession {
   /// On some phones the presence check re-activates the tag and it will not
   /// respond at all without it. Matches the reference app.
   static const presenceCheckDelay = Duration(seconds: 5);
+
+  /// Reviving happens when the session has just died, so the tag is expected
+  /// to still be on the phone. It does not need the full poll budget.
+  static const revivePollTimeout = Duration(seconds: 10);
 
   /// `FLAG_READER_SKIP_NDEF_CHECK | FLAG_READER_NO_PLATFORM_SOUNDS`. Same two
   /// bits the reference app gets from `androidCheckNDEF` / `androidPlatformSound`.
@@ -111,8 +78,9 @@ class FlutterNfcSession implements TagSession {
   }
 
   /// The reader-mode configuration of the reference app, verbatim.
-  static Future<NFCTag> _pollTag() => FlutterNfcKit.poll(
-        timeout: pollTimeout,
+  static Future<NFCTag> _pollTag({Duration timeout = pollTimeout}) =>
+      FlutterNfcKit.poll(
+        timeout: timeout,
         androidCheckNDEF: false,
         androidPlatformSound: false,
         readIso14443B: false,
@@ -147,7 +115,7 @@ class FlutterNfcSession implements TagSession {
     log.i('reviving session (finish + poll); this resets PWD_AUTH, re-auth is required');
     await _invoke(() => FlutterNfcKit.finish());
 
-    final polled = await _invoke(_pollTag);
+    final polled = await _invoke(() => _pollTag(timeout: revivePollTimeout));
 
     final uid = _parseUid(polled.id);
     if (!_sameUid(uid, tag.uid)) {
