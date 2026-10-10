@@ -1,3 +1,7 @@
+# references
+references/*.bin
+references/.flutter_nfc_kit/*
+references/reference-openroll-debug.ts
 # Miscellaneous
 *.class
 *.lock
