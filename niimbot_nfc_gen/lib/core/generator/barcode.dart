@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'media_params.dart';
 import 'payload.dart';
 import 'bytes.dart';
+import '../log.dart';
 
 class CatalogueEntry {
   final int mediaType;
@@ -578,11 +579,11 @@ CatalogueEntry? findCatalogueEntry(MediaParameters params) {
     if (entry.mediaType == params.mediaType &&
         entry.widthMm == params.widthMm &&
         entry.heightMm == params.heightMm) {
-      print('[DEBUG] findCatalogueEntry: params=${params.toMap()} found=${entry.barcode}');
+      debugLog(() => 'findCatalogueEntry: params=${params.toMap()} found=${entry.barcode}');
       return entry;
     }
   }
-  print('[DEBUG] findCatalogueEntry: params=${params.toMap()} not found');
+  debugLog(() => 'findCatalogueEntry: params=${params.toMap()} not found');
   return null;
 }
 
@@ -623,7 +624,7 @@ Uint8List setBarcode(Uint8List payload, String barcode) {
     fixed[32 + i] = barcode.codeUnitAt(i);
   }
   final out = encodePayload(mutable, fixed);
-  print('[DEBUG] setBarcode: in=${bytesToHex(payload)} barcode=$barcode out=${bytesToHex(out)}');
+  debugLog(() => 'setBarcode: in=${bytesToHex(payload)} barcode=$barcode out=${bytesToHex(out)}');
   return out;
 }
 
@@ -633,6 +634,6 @@ Uint8List applyCatalogueBarcode(Uint8List payload) {
   final out = entry != null
       ? setBarcode(payload, entry.barcode)
       : Uint8List.fromList(payload);
-  print('[DEBUG] applyCatalogueBarcode: in=${bytesToHex(payload)} out=${bytesToHex(out)}');
+  debugLog(() => 'applyCatalogueBarcode: in=${bytesToHex(payload)} out=${bytesToHex(out)}');
   return out;
 }

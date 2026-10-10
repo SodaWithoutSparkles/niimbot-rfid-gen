@@ -3,6 +3,7 @@
 import 'dart:typed_data';
 import 'orf1.dart';
 import 'bytes.dart';
+import '../log.dart';
 
 enum TagType { ntag213, ntag215, ntag216 }
 
@@ -160,7 +161,7 @@ ExportResult exportRaw(Uint8List orf1, Uint8List payload, Uint8List uid, Uint8Li
     merged[targetOffset] = (merged[targetOffset] & ~writeMask[offset]) | (orf1Memory[offset] & writeMask[offset]);
   }
 
-  print('[DEBUG] exportRaw: orf1=${bytesToHex(orf1)} payload=${bytesToHex(payload)} uid=${bytesToHex(uid)} tagType=$tagType merged=${bytesToHex(merged)}');
+  debugLog(() => 'exportRaw: orf1=${bytesToHex(orf1)} payload=${bytesToHex(payload)} uid=${bytesToHex(uid)} tagType=$tagType merged=${bytesToHex(merged)}');
 
   return ExportResult(bytes: merged, suffix: '.bin', assumptions: assumptions);
 }

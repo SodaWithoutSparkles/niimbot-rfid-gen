@@ -5,6 +5,7 @@ import 'payload.dart';
 import 'uid_masks.dart';
 import 'constants.dart';
 import 'bytes.dart';
+import '../log.dart';
 
 class Orf1Info {
   final String format;
@@ -46,7 +47,7 @@ Uint8List buildOrf1(Uint8List payload, Uint8List uid) {
   out.setRange(4, 184, memory);
   out.setRange(184, 364, masks.known);
   out.setRange(364, 544, masks.write);
-  print('[DEBUG] buildOrf1: payload=${bytesToHex(payload)} uid=${bytesToHex(uid)} out=${bytesToHex(out)}');
+  debugLog(() => 'buildOrf1: payload=${bytesToHex(payload)} uid=${bytesToHex(uid)} out=${bytesToHex(out)}');
   return out;
 }
 
@@ -99,6 +100,6 @@ Orf1Info validateOrf1(Uint8List orf1, Uint8List payload, Uint8List uid) {
     capacity: decoded.capacity,
     permanentLockWrites: false,
   );
-  print('[DEBUG] validateOrf1: orf1=${bytesToHex(orf1)} payload=${bytesToHex(payload)} uid=${bytesToHex(uid)} out=${out}');
+  debugLog(() => 'validateOrf1: orf1=${bytesToHex(orf1)} payload=${bytesToHex(payload)} uid=${bytesToHex(uid)} out=$out');
   return out;
 }

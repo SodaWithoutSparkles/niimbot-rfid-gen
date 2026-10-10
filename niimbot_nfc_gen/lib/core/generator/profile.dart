@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'media_params.dart';
 import 'bytes.dart';
 import 'payload.dart';
+import '../log.dart';
 
 class PrinterProfile {
   final String id;
@@ -108,7 +109,7 @@ late final MediaParameters defaultParameters;
 
 Future<void> initDefaultParameters() async {
   defaultParameters = payloadToParameters(hexToBytes(rollProfile.template.hex));
-  print('[DEBUG] initDefaultParameters: defaultParameters=${defaultParameters.toMap()}');
+  debugLog(() => 'initDefaultParameters: defaultParameters=${defaultParameters.toMap()}');
 }
 
 Future<Uint8List> loadTemplate(String printerProfileId, String rollProfileId) async {
@@ -130,7 +131,7 @@ Future<Uint8List> loadTemplate(String printerProfileId, String rollProfileId) as
   if (decodePayload(template).capacity != rollProfile.capacityLimit) {
     throw ArgumentError('Profile capacity mismatch.');
   }
-  print('[DEBUG] loadTemplate: template=${bytesToHex(template)}');
+  debugLog(() => 'loadTemplate: template=${bytesToHex(template)}');
   return template;
 }
 
@@ -147,6 +148,6 @@ bool isCustomParameters(MediaParameters params) {
     final currentValue = params.toMap()[key];
     return defaultValue != currentValue;
   });
-  print('[DEBUG] isCustomParameters: params=${params.toMap()} default=${defaultParameters.toMap()} result=$result');
+  debugLog(() => 'isCustomParameters: params=${params.toMap()} default=${defaultParameters.toMap()} result=$result');
   return result;
 }

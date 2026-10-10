@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'tea.dart';
 import 'crc.dart';
 import 'bytes.dart';
+import '../log.dart';
 
 class NiimbotPayload {
   final Uint8List mutable; // 4 bytes
@@ -39,7 +40,7 @@ NiimbotPayload decodePayload(Uint8List bytes) {
     count: ByteData.view(mutable.buffer, mutable.offsetInBytes, mutable.lengthInBytes).getUint16(2, Endian.little),
     capacity: ByteData.view(fixed.buffer, fixed.offsetInBytes, fixed.lengthInBytes).getUint16(58, Endian.little),
   );
-  print('[DEBUG] decodePayload: in=${bytesToHex(bytes)} mutable=${bytesToHex(mutable)} fixed=${bytesToHex(fixed)} count=${out.count} capacity=${out.capacity}');
+  debugLog(() => 'decodePayload: in=${bytesToHex(bytes)} mutable=${bytesToHex(mutable)} fixed=${bytesToHex(fixed)} count=${out.count} capacity=${out.capacity}');
   return out;
 }
 
@@ -54,7 +55,7 @@ Uint8List encodePayload(Uint8List mutable, Uint8List fixed) {
   view.setUint32(4, crc32(mutable), Endian.little);
   view.setUint32(116, crc32(fixed), Endian.little);
   final out = teaCrypt(plain, decrypt: false);
-  print('[DEBUG] encodePayload: mutable=${bytesToHex(mutable)} fixed=${bytesToHex(fixed)} out=${bytesToHex(out)}');
+  debugLog(() => 'encodePayload: mutable=${bytesToHex(mutable)} fixed=${bytesToHex(fixed)} out=${bytesToHex(out)}');
   return out;
 }
 
@@ -67,7 +68,7 @@ Uint8List rebindUid(Uint8List payload, Uint8List uid) {
   ByteData.view(decoded.mutable.buffer, decoded.mutable.offsetInBytes, decoded.mutable.lengthInBytes)
       .setUint16(2, 0, Endian.little);
   final out = encodePayload(decoded.mutable, decoded.fixed);
-  print('[DEBUG] rebindUid: in=${bytesToHex(payload)} uid=${bytesToHex(uid)} out=${bytesToHex(out)}');
+  debugLog(() => 'rebindUid: in=${bytesToHex(payload)} uid=${bytesToHex(uid)} out=${bytesToHex(out)}');
   return out;
 }
 
@@ -76,5 +77,5 @@ void assertFixedIdentity(Uint8List fixed, Uint8List uid) {
   if (!bytesEqual(fixed.sublist(0, 8), expected)) {
     throw ArgumentError('Fixed identity does not match target UID.');
   }
-  print('[DEBUG] assertFixedIdentity: fixed[0..7]=${bytesToHex(fixed.sublist(0, 8))} expected=${bytesToHex(expected)} OK');
+  debugLog(() => 'assertFixedIdentity: fixed[0..7]=${bytesToHex(fixed.sublist(0, 8))} expected=${bytesToHex(expected)} OK');
 }

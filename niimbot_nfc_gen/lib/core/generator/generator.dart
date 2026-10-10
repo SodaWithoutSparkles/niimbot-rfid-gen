@@ -7,6 +7,7 @@ import 'orf1.dart';
 import 'export.dart';
 import 'bytes.dart';
 import 'barcode.dart';
+import '../log.dart';
 
 class GenerateInput {
   final int mediaType;
@@ -118,6 +119,6 @@ Future<GenerateResult> generateTagFile(GenerateInput input) async {
     fromRead: input.targetMemory != null,
     filename: filename,
   );
-  print('[DEBUG] generateTagFile: input=${input} out=${out}');
+  debugLog(() => 'generateTagFile: input=$input out=$out');
   return out;
 }

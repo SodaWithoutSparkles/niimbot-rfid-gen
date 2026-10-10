@@ -2,6 +2,7 @@
 
 import 'dart:typed_data';
 import 'bytes.dart';
+import '../log.dart';
 
 int crc32(Uint8List bytes) {
   int crc = 0xffffffff;
@@ -12,6 +13,6 @@ int crc32(Uint8List bytes) {
     }
   }
   final out = (crc ^ 0xffffffff) & 0xffffffff;
-  print('[DEBUG] crc32: in=${bytesToHex(bytes)} out=0x${out.toRadixString(16).padLeft(8, '0')}');
+  debugLog(() => 'crc32: in=${bytesToHex(bytes)} out=0x${out.toRadixString(16).padLeft(8, '0')}');
   return out;
 }

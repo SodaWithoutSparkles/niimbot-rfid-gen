@@ -1,7 +1,10 @@
 # references
 references/*.bin
 references/.flutter_nfc_kit/*
+references/flutter_nfc_kit/*
 references/reference-openroll-debug.ts
+# Captured generator debug output; use the in-app log screen instead.
+dart_output.txt
 # Miscellaneous
 *.class
 *.lock

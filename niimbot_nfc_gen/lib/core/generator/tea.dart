@@ -3,6 +3,7 @@
 import 'dart:typed_data';
 import 'constants.dart';
 import 'bytes.dart';
+import '../log.dart';
 
 Uint8List teaCrypt(Uint8List input, {bool decrypt = false}) {
   if (input.length % 8 != 0) {
@@ -10,7 +11,7 @@ Uint8List teaCrypt(Uint8List input, {bool decrypt = false}) {
   }
   final out = Uint8List.fromList(input);
   final view = ByteData.view(out.buffer, out.offsetInBytes, out.lengthInBytes);
-  print('[DEBUG] teaCrypt: decrypt=$decrypt in=${bytesToHex(input)}');
+  debugLog(() => 'teaCrypt: decrypt=$decrypt in=${bytesToHex(input)}');
 
   for (int off = 0; off < input.length; off += 8) {
     int v0 = view.getUint32(off, Endian.little);
@@ -44,6 +45,6 @@ Uint8List teaCrypt(Uint8List input, {bool decrypt = false}) {
     view.setUint32(off, v0, Endian.little);
     view.setUint32(off + 4, v1, Endian.little);
   }
-  print('[DEBUG] teaCrypt: out=${bytesToHex(out)}');
+  debugLog(() => 'teaCrypt: out=${bytesToHex(out)}');
   return out;
 }

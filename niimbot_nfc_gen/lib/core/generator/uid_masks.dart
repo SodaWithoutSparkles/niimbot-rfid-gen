@@ -2,6 +2,7 @@
 
 import 'dart:typed_data';
 import 'bytes.dart';
+import '../log.dart';
 
 Uint8List uidHeader(Uint8List uid) {
   if (uid.length != 7) {
@@ -18,7 +19,7 @@ Uint8List uidHeader(Uint8List uid) {
     uid[6],
     uid[3] ^ uid[4] ^ uid[5] ^ uid[6],
   ]);
-  print('[DEBUG] uidHeader: uid=${bytesToHex(uid)} out=${bytesToHex(out)}');
+  debugLog(() => 'uidHeader: uid=${bytesToHex(uid)} out=${bytesToHex(out)}');
   return out;
 }
 
@@ -48,6 +49,6 @@ ProvisioningMasks provisioningMasks() {
     known[entry[0]] = entry[1];
     write[entry[0]] = entry[1];
   }
-  print('[DEBUG] provisioningMasks: known=${bytesToHex(known)} write=${bytesToHex(write)}');
+  debugLog(() => 'provisioningMasks: known=${bytesToHex(known)} write=${bytesToHex(write)}');
   return ProvisioningMasks(known: known, write: write);
 }

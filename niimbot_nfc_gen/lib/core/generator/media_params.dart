@@ -5,6 +5,7 @@ import 'payload.dart';
 import 'errors.dart';
 import 'constants.dart';
 import 'bytes.dart';
+import '../log.dart';
 
 class MediaParameters {
   final int mediaType;
@@ -97,7 +98,7 @@ void validateParameters(MediaParameters params) {
       throw FieldError(field.key, '${field.label} must be a whole number from $min to ${field.max}.');
     }
   }
-  print('[DEBUG] validateParameters: params=${params.toMap()} OK');
+  debugLog(() => 'validateParameters: params=${params.toMap()} OK');
 }
 
 int computeUsageLimit(int nominalQuantity) {
@@ -135,7 +136,7 @@ MediaParameters payloadToParameters(Uint8List payload) {
     usageLimit: result['usageLimit']!,
   );
   validateParameters(params);
-  print('[DEBUG] payloadToParameters: in=${bytesToHex(payload)} out=${params.toMap()}');
+  debugLog(() => 'payloadToParameters: in=${bytesToHex(payload)} out=${params.toMap()}');
   return params;
 }
 
@@ -154,6 +155,6 @@ Uint8List parametersToPayload(Uint8List payload, MediaParameters params) {
     }
   }
   final out = encodePayload(decoded.mutable, fixed);
-  print('[DEBUG] parametersToPayload: in=${bytesToHex(payload)} params=${params.toMap()} out=${bytesToHex(out)}');
+  debugLog(() => 'parametersToPayload: in=${bytesToHex(payload)} params=${params.toMap()} out=${bytesToHex(out)}');
   return out;
 }

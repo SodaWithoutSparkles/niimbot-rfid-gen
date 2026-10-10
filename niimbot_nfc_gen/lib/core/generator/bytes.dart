@@ -2,6 +2,8 @@
 
 import 'dart:typed_data';
 
+import '../log.dart';
+
 Uint8List hexToBytes(String hex) {
   if (!RegExp(r'^(?:[0-9a-fA-F]{2})*$').hasMatch(hex)) {
     throw ArgumentError('Invalid hexadecimal bytes.');
@@ -11,13 +13,13 @@ Uint8List hexToBytes(String hex) {
     bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
   }
   final out = Uint8List.fromList(bytes);
-  print('[DEBUG] hexToBytes: in="$hex" out=${bytesToHex(out)}');
+  debugLog(() => 'hexToBytes: in="$hex" out=${bytesToHex(out)}');
   return out;
 }
 
 String bytesToHex(Uint8List bytes) {
   final out = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
-  print('[DEBUG] bytesToHex: in_len=${bytes.length} out="$out"');
+  debugLog(() => 'bytesToHex: in_len=${bytes.length} out="$out"');
   return out;
 }
 
