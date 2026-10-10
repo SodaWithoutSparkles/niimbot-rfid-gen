@@ -185,8 +185,8 @@ void main() {
     test('exactly two pages fail, with exactly the two warnings', () {
       expect(report.failedCount, 2);
       expect(report.warnings, [
-        'block 43 could not be written (protected)',
-        'block 44 could not be written (protected)',
+        'page 43 could not be written (protected)',
+        'page 44 could not be written (protected)',
       ]);
     });
 
@@ -235,7 +235,7 @@ void main() {
         report.outcomes.skip(1).every((o) => o.status == PageStatus.notWritten),
         isTrue,
       );
-      expect(report.warnings.first, 'block 5 could not be written (protected)');
+      expect(report.warnings.first, 'page 5 could not be written (protected)');
     });
   });
 
@@ -343,7 +343,7 @@ void main() {
       final report = await WriteRunner.run(tag, plan, autoTryKnownPasswords: false);
 
       expect(report.mismatchedCount, 1);
-      expect(report.warnings, ['data mismatch in block 41']);
+      expect(report.warnings, ['data mismatch in page 41']);
     });
 
     test('a differing masked byte is reported as a mismatch', () async {
@@ -356,7 +356,7 @@ void main() {
       final report = await WriteRunner.run(tag, plan, autoTryKnownPasswords: false);
 
       expect(report.mismatchedCount, 1);
-      expect(report.warnings, ['data mismatch in block 5']);
+      expect(report.warnings, ['data mismatch in page 5']);
       expect(report.isSuccess, isTrue, reason: 'a mismatch is not an error');
     });
 
@@ -370,7 +370,7 @@ void main() {
       final report = await WriteRunner.run(tag, plan, autoTryKnownPasswords: false);
 
       expect(report.mismatchedCount, 1);
-      expect(report.warnings, ['block 5 could not be verified']);
+      expect(report.warnings, ['page 5 could not be verified']);
       expect(report.isSuccess, isTrue);
     });
   });

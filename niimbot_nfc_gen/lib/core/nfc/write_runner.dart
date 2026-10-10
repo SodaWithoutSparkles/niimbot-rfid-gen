@@ -105,7 +105,7 @@ class WriteRunner {
         outcomes.add(PageOutcome(
           page: entry.page,
           status: PageStatus.notWritten,
-          warning: 'block ${entry.page} was not written',
+          warning: 'page ${entry.page} was not written',
         ));
         continue;
       }
@@ -123,7 +123,7 @@ class WriteRunner {
         outcomes.add(PageOutcome(
           page: entry.page,
           status: PageStatus.failed,
-          warning: 'block ${entry.page} could not be written (${failure.kind.name})',
+          warning: 'page ${entry.page} could not be written (${failure.kind.name})',
         ));
         continue;
       }
@@ -169,11 +169,11 @@ class WriteRunner {
   }
 
   static PageOutcome _rejected(PagePlan entry, NfcException failure) {
-    log.w('block ${entry.page} rejected: ${failure.message}');
+    log.w('page ${entry.page} rejected: ${failure.message}');
     return PageOutcome(
       page: entry.page,
       status: PageStatus.failed,
-      warning: 'block ${entry.page} could not be written (protected)',
+      warning: 'page ${entry.page} could not be written (protected)',
     );
   }
 
@@ -236,7 +236,7 @@ class WriteRunner {
         current = await session.transceive(cmdReadPage(entry.page));
       } on NfcException catch (e) {
         if (e.kind != NfcErrorKind.comms) sessionIsGone = true;
-        log.w('block ${entry.page} could not be verified: ${e.message}');
+        log.w('page ${entry.page} could not be verified: ${e.message}');
         results.add(_unverified(entry.page));
         continue;
       }
@@ -253,12 +253,12 @@ class WriteRunner {
       if (wrong.isEmpty) {
         results.add(outcome);
       } else {
-        log.w('data mismatch in block ${entry.page}: bytes $wrong are '
+        log.w('data mismatch in page ${entry.page}: bytes $wrong are '
             '${formatHex(current)} on the tag, expected ${formatHex(entry.value)}');
         results.add(PageOutcome(
           page: entry.page,
           status: PageStatus.mismatched,
-          warning: 'data mismatch in block ${entry.page}',
+          warning: 'data mismatch in page ${entry.page}',
         ));
       }
     }
@@ -269,7 +269,7 @@ class WriteRunner {
   static PageOutcome _unverified(int page) => PageOutcome(
         page: page,
         status: PageStatus.mismatched,
-        warning: 'block $page could not be verified',
+        warning: 'page $page could not be verified',
       );
 
   static String _fatalFor(NfcException failure) => switch (failure.kind) {
