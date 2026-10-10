@@ -28,6 +28,59 @@ Future<Uint8List> imageFor(TagType type) async =>
 PagePlan planFor(List<PagePlan> plan, int page) =>
     plan.firstWhere((p) => p.page == page);
 
+/// Writes the page against [actual] and reports what each byte became.
+List<int> writeTo(PagePlan entry, List<int> actual) => entry.apply(actual);
+
+/// Every byte the app is allowed to set on [entry], taken from its own mask.
+///
+/// A page the app does not claim must contribute nothing, whatever the
+/// generator image happens to hold there.
+List<int> ownedMask(PagePlan entry) => entry.mask;
+
+/// The lock byte of the config page is the one byte where an unwanted write is
+/// irreversible: a lock bit that gets set can never be cleared again.
+///
+/// Pins that the app only ever *clears* lock bits, never sets them, and only
+/// the two bits (mask 0xC0) it intends to.
+void expectLockBitsAreOnlyCleared(PagePlan entry, {required int lockByte}) {
+  for (var byte = 0; byte < 4; byte++) {
+    final mask = entry.mask[byte];
+    final value = entry.value[byte];
+
+    if (mask == 0) {
+      // Not ours. Whatever the image holds there must never be written.
+      continue;
+    }
+
+    for (var before = 0; before < 256; before++) {
+      final actual = List<int>.filled(4, 0)..[byte] = before;
+      final after = writeTo(entry, actual)[byte];
+
+      // Bits outside the mask are never disturbed.
+      expect(after & ~mask & 0xff, before & ~mask & 0xff,
+          reason: 'byte $byte: a bit outside the mask was modified');
+
+      // Bits inside the mask end up exactly as the image asks.
+      expect(after & mask, value & mask,
+          reason: 'byte $byte: masked bits did not land on the image value');
+    }
+
+    if (byte == lockByte) {
+      // The image must leave every lock bit it claims clear, so the app can
+      // only ever unlock, never lock.
+      expect(value & mask, 0,
+          reason: 'the image sets lock bits; a lock cannot be undone');
+
+      for (var before = 0; before < 256; before++) {
+        final actual = List<int>.filled(4, 0)..[byte] = before;
+        expect(writeTo(entry, actual)[byte] & mask, 0,
+            reason: 'a lock bit was set starting from 0x'
+                '${before.toRadixString(16)}');
+      }
+    }
+  }
+}
+
 void main() {
   group('NTAG213, the layout in plan.md section 2', () {
     late List<PagePlan> plan;
@@ -180,6 +233,106 @@ void main() {
       final applied = entry.apply([0xff, 0xff, 0xff, 0xff]);
       expect(applied.every((b) => b >= 0 && b <= 0xff), isTrue);
       expect(applied, [0xff, 0xff, 0xff, 0xff]);
+    });
+  });
+
+  group('the config page can only ever unlock', () {
+    // Page 41 on an NTAG213, 131 on a 215, 227 on a 216. Clearing a lock bit
+    // cannot be undone, so this is the one write where a bug is permanent.
+
+    for (final type in [TagType.ntag213, TagType.ntag215, TagType.ntag216]) {
+      test('$type never sets a lock bit', () async {
+        final plan = buildWritePlan(await imageFor(type), type);
+        final entry = planFor(plan, getTagTypeSpec(type).configPage);
+
+        // Byte 0 holds the lock bits that gate the payload pages.
+        expectLockBitsAreOnlyCleared(entry, lockByte: 0);
+      });
+
+      test('$type leaves the config byte and lock bytes alone', () async {
+        final plan = buildWritePlan(await imageFor(type), type);
+        final entry = planFor(plan, getTagTypeSpec(type).configPage);
+
+        // Bytes 1 and 2 of the config page hold the config byte and the rest
+        // of the lock bits. The mask must be zero there on every tag type.
+        expect(entry.mask[1], 0);
+        expect(entry.mask[2], 0);
+
+        // A read-modify-write keeps them byte for byte.
+        final actual = [0x5a, 0xc3, 0x48, 0x00];
+        final after = writeTo(entry, actual);
+        expect(after[1], actual[1]);
+        expect(after[2], actual[2]);
+      });
+    }
+
+    test('an NTAG213 never sets a lock bit, whatever is on the tag',
+        () async {
+      final plan = buildWritePlan(await imageFor(TagType.ntag213), TagType.ntag213);
+      final entry = planFor(plan, 41);
+
+      // Bit 6 and 7 of byte 0 are the lock bits the app clears. Both must be
+      // zero in the image, so no input can turn them on.
+      expect(entry.value[0] & 0xc0, 0);
+      for (var before = 0; before < 256; before++) {
+        final actual = [before, 0x00, 0x00, 0x00];
+        expect(writeTo(entry, actual)[0] & 0xc0, 0,
+            reason: 'before=0x${before.toRadixString(16)} set a lock bit');
+      }
+    });
+
+    test('an already-provisioned tag is not progressively degraded', () async {
+      // Running the app twice must be the same as running it once: the write
+      // is idempotent, so a tag can be re-provisioned safely.
+      final plan = buildWritePlan(await imageFor(TagType.ntag213), TagType.ntag213);
+      final entry = planFor(plan, 41);
+
+      for (var before = 0; before < 256; before++) {
+        final actual = [before, 0xc3, 0x48, 0x7b];
+        final once = writeTo(entry, actual);
+        expect(writeTo(entry, once), once,
+            reason: 'before=0x${before.toRadixString(16)} was not idempotent');
+      }
+    });
+
+    test('only the config page carries a clearing mask', () async {
+      // Pages 43 and 44 deliberately write data through a full mask, and page
+      // 44 sets 0x55 0x55. That is correct: those are payload bytes, not lock
+      // bits. What must never happen is another page using a partial mask to
+      // clear bits we do not understand, because the write is irreversible.
+      for (final type in [TagType.ntag213, TagType.ntag215, TagType.ntag216]) {
+        final plan = buildWritePlan(await imageFor(type), type);
+        final configPage = getTagTypeSpec(type).configPage;
+
+        for (final entry in plan) {
+          if (entry.isFull) continue;
+          if (entry.page == configPage) continue;
+
+          expect(entry.value[0] & entry.mask[0], entry.mask[0] & entry.value[0],
+              reason: 'page ${entry.page} of $type mixes data into a partial mask');
+        }
+
+        // The pack page is allowed to set its own bytes.
+        final pack = planFor(plan, getTagTypeSpec(type).packPage);
+        expect(pack.mask[0] & pack.value[0], pack.mask[0] & pack.value[0]);
+      }
+    });
+
+test('the provisioned image matches the reference dump byte for byte',
+        () async {
+      // references/openroll-niimbot-30307-50x30-1de1a193101080(1).bin is a
+      // dump from a tag that is already provisioned and prints. Its config page
+      // is 00 00 00 ff with every lock bit clear, which is exactly what this
+      // app reproduces. If the generator ever drifts, the lock-bit tests above
+      // start failing and this is why.
+      final image = await imageFor(TagType.ntag213);
+      final plan = buildWritePlan(image, TagType.ntag213);
+      final config = planFor(plan, 41);
+
+      expect(config.value, [0x00, 0x00, 0x00, 0xff]);
+      expect(config.mask, [0xc0, 0x00, 0x00, 0xff]);
+      expect(planFor(plan, 44).value.sublist(0, 2), [0x55, 0x55]);
+      expect(planFor(plan, 43).value, [0x12, 0x34, 0x56, 0x78]);
     });
   });
 

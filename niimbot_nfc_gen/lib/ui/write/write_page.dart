@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../../core/generator.dart';
 import '../../core/log.dart';
 import '../../core/nfc/write_plan.dart';
 import '../log/log_page.dart';
@@ -57,6 +58,7 @@ class _WritePageState extends State<WritePage> {
     final summary = pages.length <= 12
         ? pages.join(', ')
         : '${pages.take(6).join(', ')} … ${pages.skip(pages.length - 6).join(', ')}';
+    final spec = getTagTypeSpec(_controller.tagType);
 
     return showDialog<bool>(
       context: context,
@@ -71,14 +73,19 @@ class _WritePageState extends State<WritePage> {
               const SizedBox(height: 8),
               Text(summary, style: const TextStyle(fontFamily: 'monospace')),
               const SizedBox(height: 16),
-              const Text(
-                'Pages 43 and 44 carry the password and pack bytes. Real '
-                'NTAG21x hardware rejects writes to them, which is expected '
-                'and reported as a warning.',
+              Text(
+                'Page ${spec.configPage} holds lock bits. This app only ever '
+                'clears them, never sets them, so it cannot lock a page. The '
+                'config byte is left as it is on the tag.',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
-              const SizedBox(height: 8),
-              const Text(
-                'Writing the config page changes tag behaviour permanently.',
+              const SizedBox(height: 12),
+              Text(
+                'Pages ${spec.passwordPage} and ${spec.packPage} carry the '
+                'password and pack bytes. Real NTAG21x hardware rejects '
+                'writes to them; that is expected and comes back as a '
+                'warning, not a failure.',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
           ),
