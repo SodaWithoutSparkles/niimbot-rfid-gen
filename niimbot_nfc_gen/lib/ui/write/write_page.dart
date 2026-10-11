@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/generator.dart';
 import '../../core/log.dart';
 import '../../core/nfc/write_plan.dart';
+import '../decoder/decoder_page.dart';
 import '../log/log_page.dart';
 import 'roll_form.dart';
 import 'tag_form.dart';
@@ -126,6 +127,7 @@ class _WritePageState extends State<WritePage> {
               ),
             ],
           ),
+          drawer: const _Menu(),
           body: ListView(
             padding: const EdgeInsets.all(12),
             children: [
@@ -160,6 +162,52 @@ class _WritePageState extends State<WritePage> {
           ),
         );
       },
+    );
+  }
+}
+
+class _Menu extends StatelessWidget {
+  const _Menu();
+
+  void _open(BuildContext context, Widget page) {
+    Navigator.of(context)
+      ..pop() // close the drawer
+      ..push(MaterialPageRoute<void>(builder: (_) => page));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          const DrawerHeader(
+            decoration: BoxDecoration(color: Colors.blue),
+            child: Center(
+              child: Text(
+                'NIIMBOT NFC',
+                style: TextStyle(color: Colors.white, fontSize: 20),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.edit_note),
+            title: const Text('Writer'),
+            selected: true,
+            onTap: () => Navigator.of(context).pop(),
+          ),
+          ListTile(
+            leading: const Icon(Icons.travel_explore),
+            title: const Text('Decoder'),
+            onTap: () => _open(context, const DecoderPage()),
+          ),
+          ListTile(
+            leading: const Icon(Icons.receipt_long),
+            title: const Text('Transaction log'),
+            onTap: () => _open(context, const LogPage()),
+          ),
+        ],
+      ),
     );
   }
 }

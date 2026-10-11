@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:niimbot_nfc_gen/ui/app.dart';
+import 'package:niimbot_nfc_gen/ui/decoder/decoder_page.dart';
 import 'package:niimbot_nfc_gen/ui/write/roll_form.dart';
 import 'package:niimbot_nfc_gen/ui/write/write_controller.dart';
 
@@ -198,6 +199,29 @@ void main() {
         .firstWhere((t) => (t.data ?? '').contains('whole number from 1 to'));
     expect(error.softWrap, isTrue);
     expect(error.overflow, isNot(TextOverflow.ellipsis));
+  });
+
+  testWidgets('the drawer opens the decoder', (tester) async {
+    useTallSurface(tester);
+    await tester.pumpWidget(const NfcWriterApp());
+    await tester.pumpAndSettle();
+
+    // The write page is home.
+    expect(find.byType(RollForm), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(Drawer), findsOneWidget);
+    expect(find.text('Decoder'), findsOneWidget);
+
+    await tester.tap(find.text('Decoder'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DecoderPage), findsOneWidget);
+    expect(find.text('Scan tag'), findsOneWidget);
+    // The drawer closed rather than stacking on top of the new page.
+    expect(find.byType(Drawer), findsNothing);
   });
 
   testWidgets('the log page opens from the header action', (tester) async {
