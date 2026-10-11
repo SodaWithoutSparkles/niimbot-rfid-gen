@@ -12,14 +12,17 @@ import 'write_controller.dart';
 import 'write_result_view.dart';
 
 class WritePage extends StatefulWidget {
-  const WritePage({super.key});
+  const WritePage({super.key, this.controller});
+
+  /// Injectable so tests can drive the same controller the screen uses.
+  final WriteController? controller;
 
   @override
   State<WritePage> createState() => _WritePageState();
 }
 
 class _WritePageState extends State<WritePage> {
-  final WriteController _controller = WriteController();
+  late final WriteController _controller = widget.controller ?? WriteController();
 
   @override
   void initState() {

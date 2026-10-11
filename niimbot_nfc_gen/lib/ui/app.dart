@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 
+import 'write/write_controller.dart';
 import 'write/write_page.dart';
 
 class NfcWriterApp extends StatelessWidget {
-  const NfcWriterApp({super.key});
+  const NfcWriterApp({super.key, this.controller});
+
+  /// Injectable so tests can drive the same controller the screen uses.
+  final WriteController? controller;
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +28,7 @@ class NfcWriterApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const WritePage(),
+      home: WritePage(controller: controller),
     );
   }
 }

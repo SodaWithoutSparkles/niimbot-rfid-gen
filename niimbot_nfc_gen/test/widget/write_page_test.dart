@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:niimbot_nfc_gen/ui/app.dart';
 import 'package:niimbot_nfc_gen/ui/write/roll_form.dart';
+import 'package:niimbot_nfc_gen/ui/write/write_controller.dart';
 
 /// Custom is the first dropdown entry, so it is always visible.
 Future<void> showCustom(WidgetTester tester) async {
@@ -154,6 +155,49 @@ void main() {
           .initialValue,
       '00000000',
     );
+  });
+
+  testWidgets('a scanned UID appears in the field, not just the log',
+      (tester) async {
+    useTallSurface(tester);
+    final controller = WriteController();
+    await tester.pumpWidget(NfcWriterApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    TextFormField uidField() => tester.widget<TextFormField>(
+          find.widgetWithText(TextFormField, 'UID'),
+        );
+
+    expect(uidField().initialValue, isEmpty);
+
+    // What scan() does once the tag has answered.
+    controller.applyScannedUid('1DE1A193101080');
+    await tester.pumpAndSettle();
+
+    // Regression: initialValue is read only when the field state is created, so
+    // without the revision key this stayed empty and the user saw nothing.
+    expect(uidField().initialValue, '1DE1A193101080');
+    expect(find.text('1DE1A193101080'), findsOneWidget);
+  });
+
+  testWidgets('a long quantity error wraps instead of ellipsising',
+      (tester) async {
+    useTallSurface(tester);
+    await tester.pumpWidget(const NfcWriterApp());
+    await tester.pumpAndSettle();
+    await showCustom(tester);
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Nominal quantity'),
+      '99999',
+    );
+    await tester.pumpAndSettle();
+
+    final error = tester
+        .widgetList<Text>(find.byType(Text))
+        .firstWhere((t) => (t.data ?? '').contains('whole number from 1 to'));
+    expect(error.softWrap, isTrue);
+    expect(error.overflow, isNot(TextOverflow.ellipsis));
   });
 
   testWidgets('the log page opens from the header action', (tester) async {

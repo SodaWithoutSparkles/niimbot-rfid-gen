@@ -164,6 +164,20 @@ class WriteController extends ChangeNotifier {
     notifyListeners();
   }
 
+  int _uidRevision = 0;
+
+  /// Bumped when the UID is filled by a scan rather than typed.
+  ///
+  /// The field is a TextFormField with an initialValue, and Flutter only reads
+  /// that once when the field state is created. Without re-keying, a scanned
+  /// UID lands in the controller but the box on screen stays empty.
+  int get uidRevision => _uidRevision;
+
+  void applyScannedUid(String value) {
+    _uidRevision++;
+    setUid(value);
+  }
+
   void setPassword(String value) {
     passwordHex = value.trim();
     revalidate();
@@ -255,10 +269,10 @@ class WriteController extends ChangeNotifier {
       session = await FlutterNfcSession.poll();
       scanning = null;
       // 14 plain hex digits, which is what parseUid expects.
-      uid = session.tag.uid
+      applyScannedUid(session.tag.uid
           .map((b) => b.toRadixString(16).padLeft(2, '0'))
           .join()
-          .toUpperCase();
+          .toUpperCase());
 
       final scanned = session.tag.tagType;
       if (scanned != null) tagType = scanned;

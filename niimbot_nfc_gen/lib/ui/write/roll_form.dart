@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/generator.dart';
+import 'field_error_text.dart';
 import 'write_controller.dart';
 
 class RollForm extends StatelessWidget {
@@ -156,7 +157,9 @@ class _NumberField extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         border: const OutlineInputBorder(),
-        errorText: controller.errorFor(key_),
+        // The generator's range messages are long, so let them wrap onto a
+        // second line rather than ellipsising away the useful part.
+        error: wrapFieldError(controller.errorFor(key_)),
       ),
       onChanged: (text) => controller.setField(key_, text),
     );

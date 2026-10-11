@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/generator.dart';
 import '../../core/nfc/write_runner.dart';
+import 'field_error_text.dart';
 import 'write_controller.dart';
 
 class TagForm extends StatelessWidget {
@@ -47,12 +48,15 @@ class TagForm extends StatelessWidget {
             const SizedBox(height: 16),
 
             TextFormField(
+              // Re-keyed after a scan: initialValue is read only when the field
+              // state is created, so a scanned UID would never appear.
+              key: ValueKey('uid-${controller.uidRevision}'),
               initialValue: controller.uid,
               decoration: InputDecoration(
                 labelText: 'UID',
                 hintText: '1D:E1:A1:93:10:10:80',
                 border: const OutlineInputBorder(),
-                errorText: controller.errorFor('uid'),
+                error: wrapFieldError(controller.errorFor('uid')),
               ),
               onChanged: controller.setUid,
             ),
@@ -73,7 +77,7 @@ class TagForm extends StatelessWidget {
                 labelText: 'Password',
                 helperText: 'This app cannot set a password on a tag',
                 border: const OutlineInputBorder(),
-                errorText: controller.errorFor('password'),
+                error: wrapFieldError(controller.errorFor('password')),
               ),
               onChanged: controller.setPassword,
             ),
