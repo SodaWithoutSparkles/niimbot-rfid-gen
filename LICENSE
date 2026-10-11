@@ -1,0 +1,37 @@
+MIT License
+
+Copyright (c) 2026 NIIMBOT NFC Writer contributors
+
+NOTE: This licence does NOT cover the generator.
+
+The files below are reverse-engineered from the published JavaScript of
+openroll.cc, whose source carries no licence. They are excluded from this
+grant and are not licensed under it:
+
+    lib/core/generator.dart
+    lib/core/generator/**
+    test/generator_test.dart
+
+Using those files is a separate matter from this licence. If you cannot
+accept those terms, use openroll.cc directly instead.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+The author additionally accepts no liability for any damage arising from the
+use of this software, including damage to printers, tags, phones, or data.
