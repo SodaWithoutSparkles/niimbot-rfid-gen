@@ -6,8 +6,9 @@
 //     hardware by design, so a rejected page becomes a warning and the run
 //     continues. Only [WriteReport.fatalError] makes a write unsuccessful.
 //   * A wrong password is the one way to brick a tag, because NTAG21x counts
-//     failed authentications against a finite limit. Every candidate is tried
-//     at most once per tag, and the loop never runs twice for the same tag.
+//     failed authentications against a finite limit. So we never guess a
+//     password until the tag has actually refused a write, and every candidate
+//     is tried at most once per tag.
 
 import 'dart:typed_data';
 
@@ -18,7 +19,13 @@ import 'tag_session.dart';
 import 'write_plan.dart';
 
 /// Tried after the entered password when auto-try is on, in this order.
-const List<String> knownPasswordHex = ['12345678', '00000000', 'FFFFFFFF'];
+///
+/// FFFFFFFF is first because it is the NXP factory default, and because this
+/// app can never actually set a password: the generator's password bytes land
+/// on the page that real NTAG21x hardware refuses to write (plan fact #8). So
+/// a tag this app has provisioned still carries its factory password, and the
+/// common protected case is a tag whose password is all ones.
+const List<String> knownPasswordHex = ['FFFFFFFF', '12345678', '00000000'];
 
 enum PageStatus {
   /// Written and confirmed by a read-back.
@@ -72,12 +79,30 @@ class WriteReport {
       outcomes.where((o) => o.status == PageStatus.mismatched).length;
 }
 
+/// What the pre-flight settled before the main loop starts.
+class _Gate {
+  /// How the probe page turned out.
+  final PageStatus probeStatus;
+
+  /// First page the main loop still has to write. The probe is page 0, so this
+  /// is always 1.
+  final int nextIndex;
+
+  /// The password that authenticated, kept so a revive can re-authenticate.
+  /// Null when the tag needed no password.
+  final List<int>? unlocked;
+
+  /// Set when the probe page could not be written at all.
+  final String? fatal;
+
+  const _Gate(this.probeStatus, this.nextIndex, this.unlocked, this.fatal);
+}
+
 class WriteRunner {
   /// How many times a dead session may be brought back before the run stops.
   static const int maxRevives = 2;
 
-  /// The message used when the very first page is rejected, which means the
-  /// tag never accepted us at all rather than protecting one page.
+  /// Used when the probe page cannot be written even after authenticating.
   static const earlyAbortMessage =
       'The tag rejected the write - it is probably password protected.';
 
@@ -91,14 +116,29 @@ class WriteRunner {
       return const WriteReport(outcomes: [], warnings: []);
     }
 
-    // The password that worked, kept for any revive later on.
-    final unlocked = await _authenticate(session, password, autoTryKnownPasswords);
+    // Get in before writing anything else. See _openTheTag.
+    final gate = await _openTheTag(
+      session,
+      plan,
+      password,
+      autoTryKnownPasswords,
+    );
 
-    final outcomes = <PageOutcome>[];
+    final outcomes = <PageOutcome>[
+      PageOutcome(
+        page: plan.first.page,
+        status: gate.probeStatus,
+        warning: gate.probeStatus == PageStatus.failed
+            ? 'page ${plan.first.page} could not be written (protected)'
+            : null,
+      ),
+    ];
+
+    final unlocked = gate.unlocked;
     var revivesLeft = maxRevives;
-    String? fatal;
+    String? fatal = gate.fatal;
 
-    for (var index = 0; index < plan.length; index++) {
+    for (var index = gate.nextIndex; index < plan.length; index++) {
       final entry = plan[index];
 
       if (fatal != null) {
@@ -128,13 +168,7 @@ class WriteRunner {
         continue;
       }
 
-      // A NAK. The very first page failing means the tag never accepted us.
-      if (index == 0) {
-        fatal = earlyAbortMessage;
-        outcomes.add(_rejected(entry, failure));
-        continue;
-      }
-
+      // A NAK on a later page. Expected for the password and pack pages.
       outcomes.add(_rejected(entry, failure));
 
       if (index + 1 >= plan.length) break; // nothing left to save, do not revive
@@ -144,9 +178,10 @@ class WriteRunner {
       }
 
       // A NAK leaves the tag IDLE; the session has to come back before the
-      // remaining pages can be attempted at all.
+      // remaining pages can be attempted at all. So does an authentication.
       revivesLeft--;
-      log.i('reviving before the remaining pages (${maxRevives - revivesLeft}/$maxRevives)');
+      log.i('reviving before the remaining pages '
+          '(${maxRevives - revivesLeft}/$maxRevives)');
       try {
         await session.revive();
         if (unlocked != null && !await _pwdAuth(session, unlocked)) {
@@ -177,8 +212,69 @@ class WriteRunner {
     );
   }
 
+  /// Works out how to get into the tag, using the first page as the probe.
+  ///
+  /// The order matters. A refused WRITE costs nothing, but a refused PWD_AUTH
+  /// increments the tag's finite failure counter, which is the one way to
+  /// brick a tag. So the first thing we do is try to write page 1 with no
+  /// password at all:
+  ///
+  ///  * most tags are unprotected, so this succeeds immediately and we spend no
+  ///    authentication attempts whatsoever;
+  ///  * only when the write is refused do we start guessing passwords, and each
+  ///    candidate is confirmed by re-probing that same single page rather than
+  ///    by starting the whole 34-page write.
+  ///
+  /// The probe page is genuinely written, so the main loop resumes after it.
+  static Future<_Gate> _openTheTag(
+    TagSession session,
+    List<PagePlan> plan,
+    List<int> password,
+    bool autoTry,
+  ) async {
+    final probe = plan.first;
+
+    final direct = await _tryWrite(session, probe);
+    if (direct == null) {
+      log.i('page ${probe.page} accepted an unauthenticated write');
+      return const _Gate(PageStatus.written, 1, null, null);
+    }
+
+    // A NAK could mean the tag is protected. Anything else means the tag is
+    // gone or the hardware cannot do this, and guessing a password would only
+    // turn a clear diagnosis into a misleading one.
+    if (direct.kind != NfcErrorKind.comms) {
+      return _Gate(PageStatus.failed, 1, null, _fatalFor(direct));
+    }
+
+    log.i('page ${probe.page} refused an unauthenticated write: '
+        '${direct.message}');
+
+    // The tag is protected, or refuses writes outright. Try to authenticate.
+    for (final candidate in _candidates(password, autoTry)) {
+      if (!await _pwdAuth(session, candidate)) {
+        log.i('PWD_AUTH rejected ${formatHex(candidate)}');
+        continue;
+      }
+
+      log.i('PWD_AUTH accepted ${formatHex(candidate)}, re-probing');
+      final afterAuth = await _tryWrite(session, probe);
+      if (afterAuth == null) {
+        log.i('page ${probe.page} accepted after authenticating');
+        return _Gate(PageStatus.written, 1, candidate, null);
+      }
+      log.w('page ${probe.page} still refused after authenticating: '
+          '${afterAuth.message}');
+    }
+
+    return _Gate(PageStatus.failed, 1, null, earlyAbortMessage);
+  }
+
   /// Writes one page. Never throws: the caller gets null on success.
-  static Future<NfcException?> _tryWrite(TagSession session, PagePlan entry) async {
+  static Future<NfcException?> _tryWrite(
+    TagSession session,
+    PagePlan entry,
+  ) async {
     try {
       if (!entry.isFull) {
         final current = await session.transceive(cmdReadPage(entry.page));
@@ -188,8 +284,9 @@ class WriteRunner {
             'page ${entry.page} read back only ${current.length} bytes',
           );
         }
-        final response =
-            await session.transceive(cmdWritePage(entry.page, entry.apply(current)));
+        final response = await session.transceive(
+          cmdWritePage(entry.page, entry.apply(current)),
+        );
         if (!isAck(response)) {
           return NfcException(NfcErrorKind.comms, describeAck(response));
         }
@@ -282,16 +379,8 @@ class WriteRunner {
         _ => failure.message,
       };
 
-  /// Tries the entered password first, then the known ones. Each candidate is
-  /// tried at most once, and this loop runs at most once per tag.
-  ///
-  /// Returns the password that worked, or null when none did. A tag with no
-  /// protection answers PWD_AUTH with a NAK too, so a null result is normal.
-  static Future<List<int>?> _authenticate(
-    TagSession session,
-    List<int> password,
-    bool autoTry,
-  ) async {
+  /// The entered password first, then the known ones, without duplicates.
+  static List<List<int>> _candidates(List<int> password, bool autoTry) {
     final candidates = <List<int>>[];
     final seen = <String>{};
 
@@ -308,27 +397,17 @@ class WriteRunner {
       }
     }
 
-    for (final candidate in candidates) {
-      if (await _pwdAuth(session, candidate)) {
-        log.i('PWD_AUTH accepted ${formatHex(candidate)}');
-        return candidate;
-      }
-      log.i('PWD_AUTH rejected ${formatHex(candidate)}');
-    }
-
-    if (candidates.isEmpty) {
-      log.i('no password to try; writing unauthenticated');
-    } else {
-      log.i('no candidate password authenticated; the tag is probably not '
-          'protected, writing unauthenticated');
-    }
-    return null;
+    return candidates;
   }
 
+  /// Tries PWD_AUTH. A tag with no protection NAKs this too, which is why the
+  /// unauthenticated probe runs first and this is only reached once the tag has
+  /// refused a write.
+  ///
+  /// Two bytes is a PACK. An empty response is the ACK Android swallowed.
   static Future<bool> _pwdAuth(TagSession session, List<int> password) async {
     try {
       final response = await session.transceive(cmdPwdAuth(password));
-      // Two bytes is a PACK. An empty response is the ACK Android swallowed.
       return response.length <= 2;
     } on NfcException {
       return false;

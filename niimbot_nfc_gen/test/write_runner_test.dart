@@ -21,8 +21,12 @@ class FakeTag implements TagSession {
   /// Pages whose read fails outright.
   final Set<int> unreadable = {};
 
-  /// Password that PWD_AUTH accepts. Null means nothing is accepted.
+  /// The tag's real password. Null means the tag is unprotected: writes always
+  /// work and PWD_AUTH always NAKs, which is how real hardware behaves.
   List<int>? password;
+
+  /// True once a PWD_AUTH has succeeded. Writes are refused until then.
+  bool _unlocked = false;
 
   /// Auth attempts seen, so the loop can be checked against the tag's counter.
   final List<List<int>> authAttempts = [];
@@ -65,8 +69,11 @@ class FakeTag implements TagSession {
         _pendingRead = null;
         final candidate = command.sublist(1, 5);
         authAttempts.add(candidate);
+        // An unprotected tag NAKs this too, which is why the runner probes
+        // with a write before it ever tries to authenticate.
         if (password == null) throw _nak();
         if (!_same(candidate, password!)) throw _nak();
+        _unlocked = true;
         return bytes([0x00, 0x00]); // PACK
 
       case 0x30: // READ
@@ -81,6 +88,8 @@ class FakeTag implements TagSession {
         commands.add('WRITE $page');
         if (_pendingRead == page) readBeforeWrite.add(page);
         _pendingRead = null;
+        // A protected tag refuses writes until PWD_AUTH has succeeded.
+        if (password != null && !_unlocked) throw _nak();
         if (rejectWrites.contains(page)) throw _nak();
         writes.add(page);
         writtenBytes[page] = command.sublist(2, 6);
@@ -96,6 +105,8 @@ class FakeTag implements TagSession {
   Future<void> revive() async {
     if (reviveError != null) throw reviveError!;
     revives++;
+    // A revive resets the authenticated session, exactly like real hardware.
+    _unlocked = false;
   }
 
   @override
@@ -119,13 +130,26 @@ List<PagePlan> ntag213Plan() => buildWritePlan(Uint8List(180), TagType.ntag213);
 /// Pages the tag is expected to reject on real NTAG213 hardware.
 const hardwareRejected = {43, 44};
 
+/// Runs the runner against a protected tag whose password is [password].
+Future<WriteReport> runProtected(
+  FakeTag tag, {
+  List<int> entered = const [],
+  bool autoTry = true,
+}) =>
+    WriteRunner.run(
+      tag,
+      ntag213Plan(),
+      password: entered,
+      autoTryKnownPasswords: autoTry,
+    );
+
 void main() {
   group('happy path', () {
     test('every page is written and verified, no warnings', () async {
       final tag = FakeTag();
       final plan = ntag213Plan();
 
-      final report = await WriteRunner.run(tag, plan, autoTryKnownPasswords: false);
+      final report = await WriteRunner.run(tag, plan);
 
       expect(report.isSuccess, isTrue);
       expect(report.fatalError, isNull);
@@ -139,8 +163,7 @@ void main() {
 
     test('full pages are written without a read first', () async {
       final tag = FakeTag();
-      final plan = ntag213Plan();
-      await WriteRunner.run(tag, plan, autoTryKnownPasswords: false);
+      await WriteRunner.run(tag, ntag213Plan());
 
       // Only the three partial pages (41, 42, 44) get a read-modify-write.
       expect(tag.readBeforeWrite, [41, 42, 44]);
@@ -153,11 +176,7 @@ void main() {
       memory.setRange(172, 178, [0x12, 0x34, 0x56, 0x78, 0x55, 0x55]);
 
       final tag = FakeTag();
-      await WriteRunner.run(
-        tag,
-        buildWritePlan(memory, TagType.ntag213),
-        autoTryKnownPasswords: false,
-      );
+      await WriteRunner.run(tag, buildWritePlan(memory, TagType.ntag213));
 
       expect(tag.writtenBytes[43], [0x12, 0x34, 0x56, 0x78]);
       expect(tag.writtenBytes[44], [0x55, 0x55, 0x00, 0x00]);
@@ -170,11 +189,7 @@ void main() {
 
     setUp(() async {
       tag = FakeTag()..rejectWrites.addAll(hardwareRejected);
-      report = await WriteRunner.run(
-        tag,
-        ntag213Plan(),
-        autoTryKnownPasswords: false,
-      );
+      report = await WriteRunner.run(tag, ntag213Plan());
     });
 
     test('it is still a success', () {
@@ -206,28 +221,20 @@ void main() {
     });
   });
 
-  group('early abort', () {
-    test('the first page failing means the tag never accepted us', () async {
+  group('the probe page', () {
+    test('a refusal on page 5 stops the run before anything else', () async {
       final tag = FakeTag()..rejectWrites.add(5);
-      final report = await WriteRunner.run(
-        tag,
-        ntag213Plan(),
-        autoTryKnownPasswords: false,
-      );
+      final report = await WriteRunner.run(tag, ntag213Plan());
 
       expect(report.isSuccess, isFalse);
       expect(report.fatalError, contains('password protected'));
       expect(report.writtenCount, 0);
-      expect(tag.writes, isEmpty, reason: 'nothing should be attempted after');
+      expect(tag.writes, isEmpty, reason: 'nothing attempted after the probe');
     });
 
-    test('the remaining pages are reported as not written', () async {
+    test('the rest are reported as not written', () async {
       final tag = FakeTag()..rejectWrites.add(5);
-      final report = await WriteRunner.run(
-        tag,
-        ntag213Plan(),
-        autoTryKnownPasswords: false,
-      );
+      final report = await WriteRunner.run(tag, ntag213Plan());
 
       expect(report.outcomes.length, 34);
       expect(report.outcomes.first.status, PageStatus.failed);
@@ -237,18 +244,22 @@ void main() {
       );
       expect(report.warnings.first, 'page 5 could not be written (protected)');
     });
+
+    test('the probe page is written once, not twice', () async {
+      final tag = FakeTag();
+      await WriteRunner.run(tag, ntag213Plan());
+
+      expect(tag.writes.where((p) => p == 5).length, 1);
+      expect(tag.commands[0], 'WRITE 5');
+    });
   });
 
   group('revive budget', () {
     test('a dead session is revived at most twice', () async {
-      // Page 5 is left out on purpose: rejecting it is the early-abort path.
+      // Page 5 is left out on purpose: refusing it is the probe failure path.
       final tag = FakeTag()
         ..rejectWrites.addAll({6, 7, 8, 9, 10, 11, 12, 13});
-      final report = await WriteRunner.run(
-        tag,
-        ntag213Plan(),
-        autoTryKnownPasswords: false,
-      );
+      final report = await WriteRunner.run(tag, ntag213Plan());
 
       expect(tag.revives, WriteRunner.maxRevives);
       expect(report.isSuccess, isFalse);
@@ -257,11 +268,7 @@ void main() {
 
     test('pages left over after the budget is spent are not written', () async {
       final tag = FakeTag()..rejectWrites.addAll({6, 7, 8, 9, 10, 11, 12, 13});
-      final report = await WriteRunner.run(
-        tag,
-        ntag213Plan(),
-        autoTryKnownPasswords: false,
-      );
+      final report = await WriteRunner.run(tag, ntag213Plan());
 
       final notWritten =
           report.outcomes.where((o) => o.status == PageStatus.notWritten).length;
@@ -270,11 +277,7 @@ void main() {
 
     test('no revive is spent when only the last pages fail', () async {
       final tag = FakeTag()..rejectWrites.add(44);
-      final report = await WriteRunner.run(
-        tag,
-        ntag213Plan(),
-        autoTryKnownPasswords: false,
-      );
+      final report = await WriteRunner.run(tag, ntag213Plan());
 
       expect(tag.revives, 0, reason: 'nothing left to save');
       expect(report.isSuccess, isTrue);
@@ -284,11 +287,7 @@ void main() {
       final tag = FakeTag()
         ..rejectWrites.add(7)
         ..reviveError = const NfcException(NfcErrorKind.removed, 'gone');
-      final report = await WriteRunner.run(
-        tag,
-        ntag213Plan(),
-        autoTryKnownPasswords: false,
-      );
+      final report = await WriteRunner.run(tag, ntag213Plan());
 
       expect(report.isSuccess, isFalse);
       expect(report.fatalError, contains('Lost contact'));
@@ -297,15 +296,14 @@ void main() {
     test('a removed tag is fatal, with no revive attempted', () async {
       final tag = FakeTag()
         ..fatalError = const NfcException(NfcErrorKind.removed, 'tag removed');
-      final report = await WriteRunner.run(
-        tag,
-        ntag213Plan(),
-        autoTryKnownPasswords: false,
-      );
+      final report = await WriteRunner.run(tag, ntag213Plan());
 
       expect(report.isSuccess, isFalse);
       expect(report.fatalError, 'The tag was removed from the phone.');
+      expect(report.fatalError, isNot(contains('password')));
       expect(tag.revives, 0);
+      expect(tag.authAttempts, isEmpty,
+          reason: 'a lost tag is not a wrong password');
     });
   });
 
@@ -322,7 +320,7 @@ void main() {
       // Bytes 1 and 2 differ on the tag, but the mask does not claim them.
       tag.corruptOnRead[41] = [0x80, 0xaa, 0xbb, 0x11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-      final report = await WriteRunner.run(tag, plan, autoTryKnownPasswords: false);
+      final report = await WriteRunner.run(tag, plan);
 
       expect(report.writtenCount, 1);
       expect(report.warnings, isEmpty);
@@ -340,7 +338,7 @@ void main() {
       // The low nibble of byte 1 is ours and it is wrong; byte 2 is not ours.
       tag.corruptOnRead[41] = [0x80, 0x0a, 0xbb, 0x11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-      final report = await WriteRunner.run(tag, plan, autoTryKnownPasswords: false);
+      final report = await WriteRunner.run(tag, plan);
 
       expect(report.mismatchedCount, 1);
       expect(report.warnings, ['data mismatch in page 41']);
@@ -353,7 +351,7 @@ void main() {
       ];
       tag.corruptOnRead[5] = List.filled(16, 0);
 
-      final report = await WriteRunner.run(tag, plan, autoTryKnownPasswords: false);
+      final report = await WriteRunner.run(tag, plan);
 
       expect(report.mismatchedCount, 1);
       expect(report.warnings, ['data mismatch in page 5']);
@@ -367,7 +365,7 @@ void main() {
       ];
       tag.unreadable.add(5);
 
-      final report = await WriteRunner.run(tag, plan, autoTryKnownPasswords: false);
+      final report = await WriteRunner.run(tag, plan);
 
       expect(report.mismatchedCount, 1);
       expect(report.warnings, ['page 5 could not be verified']);
@@ -376,29 +374,47 @@ void main() {
   });
 
   group('password handling', () {
-    test('no auto-try means exactly one auth attempt', () async {
-      final tag = FakeTag();
-      await WriteRunner.run(
+    test('an unprotected tag is never asked for a password', () async {
+      final tag = FakeTag(); // password stays null, so it is unprotected
+      final report = await WriteRunner.run(
         tag,
         ntag213Plan(),
         password: bytes([0xaa, 0xbb, 0xcc, 0xdd]),
-        autoTryKnownPasswords: false,
       );
-      expect(tag.authAttempts.length, 1);
-      expect(tag.authAttempts.single, [0xaa, 0xbb, 0xcc, 0xdd]);
+
+      expect(tag.authAttempts, isEmpty,
+          reason: 'a refused WRITE is free, a refused PWD_AUTH is not');
+      expect(report.isSuccess, isTrue);
+      expect(report.writtenCount, 34);
     });
 
-    test('a rejected password falls through to the known ones, in order', () async {
+    test('the probe write happens before any authentication', () async {
+      final tag = FakeTag()..password = hexToBytes('FFFFFFFF');
+      await WriteRunner.run(tag, ntag213Plan());
+
+      expect(tag.commands[0], 'WRITE 5',
+          reason: 'probe first, authenticate only if the probe is refused');
+      expect(tag.commands.indexOf('PWD_AUTH'), greaterThan(0));
+    });
+
+    test('the all-F password is tried first among the known ones', () async {
+      final tag = FakeTag()..password = hexToBytes('FFFFFFFF');
+      await runProtected(tag, entered: hexToBytes('DEADBEEF'));
+
+      expect(tag.authAttempts, [
+        [0xde, 0xad, 0xbe, 0xef], // the entered one
+        [0xff, 0xff, 0xff, 0xff], // then the factory default
+      ]);
+    });
+
+    test('a rejected password falls through to the known ones, in order',
+        () async {
       final tag = FakeTag()..password = hexToBytes('00000000');
-      await WriteRunner.run(
-        tag,
-        ntag213Plan(),
-        password: bytes([0xde, 0xad, 0xbe, 0xef]),
-        autoTryKnownPasswords: true,
-      );
+      await runProtected(tag, entered: bytes([0xde, 0xad, 0xbe, 0xef]));
 
       expect(tag.authAttempts, [
         [0xde, 0xad, 0xbe, 0xef],
+        [0xff, 0xff, 0xff, 0xff],
         [0x12, 0x34, 0x56, 0x78],
         [0x00, 0x00, 0x00, 0x00],
       ]);
@@ -406,73 +422,81 @@ void main() {
 
     test('it stops as soon as one candidate works', () async {
       final tag = FakeTag()..password = hexToBytes('12345678');
-      await WriteRunner.run(
-        tag,
-        ntag213Plan(),
-        password: hexToBytes('DEADBEEF'),
-        autoTryKnownPasswords: true,
-      );
+      await runProtected(tag, entered: hexToBytes('DEADBEEF'));
 
       expect(tag.authAttempts, [
         [0xde, 0xad, 0xbe, 0xef],
+        [0xff, 0xff, 0xff, 0xff],
         [0x12, 0x34, 0x56, 0x78],
       ]);
       expect(tag.authAttempts, isNot(contains([0x00, 0x00, 0x00, 0x00])));
     });
 
-    test('each candidate is tried at most once, even on a second run', () async {
-      final tag = FakeTag();
-      final plan = ntag213Plan();
-
-      await WriteRunner.run(tag, plan, autoTryKnownPasswords: true);
-      final firstRun = tag.authAttempts.length;
-
-      await WriteRunner.run(tag, plan, autoTryKnownPasswords: true);
-      final secondRun = tag.authAttempts.length;
-
-      expect(firstRun, lessThanOrEqualTo(knownPasswordHex.length));
-      expect(secondRun - firstRun, lessThanOrEqualTo(knownPasswordHex.length));
-    });
-
-    test('an unprotected tag writes anyway after every candidate fails', () async {
-      final tag = FakeTag(); // password stays null, so nothing authenticates
-      final report = await WriteRunner.run(
+    test('no auto-try means only the entered password', () async {
+      final tag = FakeTag()..password = hexToBytes('FFFFFFFF');
+      await runProtected(
         tag,
-        ntag213Plan(),
-        password: bytes([1, 2, 3, 4]),
-        autoTryKnownPasswords: true,
+        entered: bytes([0xaa, 0xbb, 0xcc, 0xdd]),
+        autoTry: false,
       );
 
-      expect(tag.authAttempts.length, 4, reason: 'entered plus three known');
-      expect(report.isSuccess, isTrue);
-      expect(report.writtenCount, 34);
+      expect(tag.authAttempts, [
+        [0xaa, 0xbb, 0xcc, 0xdd],
+      ]);
+    });
+
+    test('a protected tag with auto-try off fails cleanly', () async {
+      final tag = FakeTag()..password = hexToBytes('FFFFFFFF');
+      final report = await runProtected(
+        tag,
+        entered: bytes([0xaa, 0xbb, 0xcc, 0xdd]),
+        autoTry: false,
+      );
+
+      expect(tag.authAttempts.length, 1, reason: 'only what was allowed');
+      expect(report.isSuccess, isFalse);
+      expect(report.fatalError, contains('password protected'));
+      expect(report.writtenCount, 0);
+    });
+
+    test('each candidate is tried at most once per run', () async {
+      final tag = FakeTag()..password = hexToBytes('00000000');
+      await runProtected(tag);
+
+      expect(tag.authAttempts.length, 3, reason: 'the three known passwords');
+      expect(tag.authAttempts.toSet().length, 3, reason: 'no repeats');
+    });
+
+    test('authenticating does not change what gets written', () async {
+      final open = FakeTag();
+      final openReport = await WriteRunner.run(open, ntag213Plan());
+
+      final locked = FakeTag()..password = hexToBytes('FFFFFFFF');
+      final lockedReport = await WriteRunner.run(locked, ntag213Plan());
+
+      expect(lockedReport.writtenCount, openReport.writtenCount);
+      expect(lockedReport.warnings, openReport.warnings);
+      expect(lockedReport.isSuccess, isTrue);
     });
 
     test('a blank password is not sent to the tag', () async {
-      final tag = FakeTag();
-      await WriteRunner.run(
-        tag,
-        ntag213Plan(),
-        password: bytes([1, 2]),
-        autoTryKnownPasswords: false,
-      );
+      final tag = FakeTag()..password = hexToBytes('FFFFFFFF');
+      await runProtected(tag, entered: bytes([1, 2]), autoTry: false);
+
       expect(tag.authAttempts, isEmpty);
     });
 
-    test('the cached password is re-sent after a revive', () async {
+    test('the password that worked is re-sent after a revive', () async {
       final tag = FakeTag()
         ..password = hexToBytes('12345678')
         ..rejectWrites.addAll({43, 44});
-      await WriteRunner.run(
-        tag,
-        ntag213Plan(),
-        password: hexToBytes('12345678'),
-        autoTryKnownPasswords: true,
-      );
+      await runProtected(tag, entered: hexToBytes('DEADBEEF'));
 
-      // One attempt up front, one after the revive between 43 and 44.
-      expect(tag.authAttempts.length, 2);
-      expect(tag.authAttempts, everyElement([0x12, 0x34, 0x56, 0x78]));
+      // deadbeef, then FFFFFFFF, then 12345678 to get in, then once more after
+      // the revive between pages 43 and 44.
+      const good = [0x12, 0x34, 0x56, 0x78];
+      expect(tag.authAttempts.last, good);
+      expect(tag.authAttempts.where((p) => p.join() == good.join()).length, 2);
     });
   });
 
