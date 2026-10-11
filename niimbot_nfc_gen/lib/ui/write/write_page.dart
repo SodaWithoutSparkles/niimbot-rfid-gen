@@ -10,6 +10,7 @@ import '../log/log_page.dart';
 import 'roll_form.dart';
 import 'tag_form.dart';
 import 'write_controller.dart';
+import 'write_progress_bar.dart';
 import 'write_result_view.dart';
 
 class WritePage extends StatefulWidget {
@@ -154,6 +155,10 @@ class _WritePageState extends State<WritePage> {
                     : const Icon(Icons.nfc),
                 label: Text(controller.busy ? 'Writing…' : 'Write tag'),
               ),
+              if (controller.progress != null) ...[
+                const SizedBox(height: 12),
+                WriteProgressBar(progress: controller.progress!),
+              ],
               if (controller.report != null) ...[
                 const SizedBox(height: 12),
                 WriteResultView(report: controller.report!),

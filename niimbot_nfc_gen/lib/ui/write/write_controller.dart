@@ -7,6 +7,7 @@ import '../../core/generator.dart';
 import '../../core/nfc/flutter_nfc_session.dart';
 import '../../core/nfc/tag_session.dart';
 import '../../core/nfc/write_plan.dart';
+import '../../core/nfc/write_progress.dart';
 import '../../core/nfc/write_runner.dart';
 
 /// A memory image and the pages that will be written to it.
@@ -67,6 +68,13 @@ class WriteController extends ChangeNotifier {
   String? banner;
 
   WriteReport? report;
+
+  /// Where the write has got to. Null when nothing is running.
+  ///
+  /// A write is about 70 NFC round trips and one of them can block for ten
+  /// seconds waiting for a tag, so this is what keeps the screen honest
+  /// instead of showing an indeterminate spinner.
+  WriteProgress? progress;
 
   /// Messages keyed by the generator's own field names, so a FieldError can
   /// be rendered under the field that caused it.
@@ -328,9 +336,18 @@ class WriteController extends ChangeNotifier {
   }
 
   /// Polls for a tag and runs the write. The caller confirms the plan first.
+  ///
+  /// [progress] is updated throughout, because a write is dozens of NFC round
+  /// trips and one of them can block waiting for the tag.
   Future<WriteReport> writePlan(List<PagePlan> plan) async {
     busy = true;
     report = null;
+    progress = const WriteProgress(
+      WritePhase.connecting,
+      0,
+      1,
+      'Waiting for a tag…',
+    );
     notifyListeners();
 
     TagSession? session;
@@ -341,6 +358,10 @@ class WriteController extends ChangeNotifier {
         plan,
         password: passwordBytes,
         autoTryKnownPasswords: autoTryPasswords,
+        onProgress: (value) {
+          progress = value;
+          notifyListeners();
+        },
       );
       report = result;
       return result;
@@ -354,6 +375,7 @@ class WriteController extends ChangeNotifier {
       return failure;
     } finally {
       await session?.close();
+      progress = null;
       busy = false;
       notifyListeners();
     }

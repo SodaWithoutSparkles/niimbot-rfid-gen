@@ -17,6 +17,7 @@ import '../log.dart';
 import 'commands.dart';
 import 'tag_session.dart';
 import 'write_plan.dart';
+import 'write_progress.dart';
 
 /// Tried after the entered password when auto-try is on, in this order.
 ///
@@ -98,6 +99,24 @@ class _Gate {
   const _Gate(this.probeStatus, this.nextIndex, this.unlocked, this.fatal);
 }
 
+/// Counts round trips across the whole run and emits a [WriteProgress].
+class _Progress {
+  final ProgressCallback? _callback;
+  int done = 0;
+  int total;
+
+  _Progress(this._callback, this.total);
+
+  void emit(WritePhase phase, String message) {
+    _callback?.call(WriteProgress(phase, done, total, message));
+  }
+
+  void step(WritePhase phase, String message) {
+    done++;
+    emit(phase, message);
+  }
+}
+
 class WriteRunner {
   /// How many times a dead session may be brought back before the run stops.
   static const int maxRevives = 2;
@@ -111,10 +130,30 @@ class WriteRunner {
     List<PagePlan> plan, {
     List<int> password = const [],
     bool autoTryKnownPasswords = true,
+    ProgressCallback? onProgress,
   }) async {
+    // A listener that throws must never abort a write that is half done.
+    void safeEmit(WriteProgress value) {
+      try {
+        onProgress?.call(value);
+      } catch (e) {
+        log.w('progress listener threw, ignoring: $e');
+      }
+    }
+
     if (plan.isEmpty) {
       return const WriteReport(outcomes: [], warnings: []);
     }
+
+    // Connecting (1) + one write per page (plan.length) + one read per page in
+    // the verify pass (plan.length). Authentication and revives interrupt these
+    // but do not add their own steps, because they are bounded and rare.
+    final progress = _Progress(
+      safeEmit,
+      1 + plan.length * 2,
+    );
+
+    progress.emit(WritePhase.probing, 'Checking whether the tag is protected…');
 
     // Get in before writing anything else. See _openTheTag.
     final gate = await _openTheTag(
@@ -122,7 +161,11 @@ class WriteRunner {
       plan,
       password,
       autoTryKnownPasswords,
+      progress,
     );
+
+    // The probe page counts as one write step.
+    progress.done = gate.nextIndex + 1;
 
     final outcomes = <PageOutcome>[
       PageOutcome(
@@ -141,16 +184,23 @@ class WriteRunner {
     for (var index = gate.nextIndex; index < plan.length; index++) {
       final entry = plan[index];
 
+      progress.emit(
+        WritePhase.writing,
+        'Writing page ${index + 1} of ${plan.length}…',
+      );
+
       if (fatal != null) {
         outcomes.add(PageOutcome(
           page: entry.page,
           status: PageStatus.notWritten,
           warning: 'page ${entry.page} was not written',
         ));
+        progress.done++;
         continue;
       }
 
       final failure = await _tryWrite(session, entry);
+      progress.done++;
 
       if (failure == null) {
         outcomes.add(PageOutcome(page: entry.page, status: PageStatus.written));
@@ -182,6 +232,10 @@ class WriteRunner {
       revivesLeft--;
       log.i('reviving before the remaining pages '
           '(${maxRevives - revivesLeft}/$maxRevives)');
+      progress.emit(
+        WritePhase.reviving,
+        'Tag went idle — hold it against the phone…',
+      );
       try {
         await session.revive();
         if (unlocked != null && !await _pwdAuth(session, unlocked)) {
@@ -193,7 +247,13 @@ class WriteRunner {
       }
     }
 
-    final verified = await _verify(session, plan, outcomes);
+    progress.emit(
+      WritePhase.verifying,
+      'Reading back to confirm (1 of ${outcomes.length})…',
+    );
+    final verified = await _verify(session, plan, outcomes, progress);
+    progress.emit(WritePhase.done, 'Done');
+
     final warnings = verified.map((o) => o.warning).whereType<String>().toList();
 
     log.i('write result: ${verified.length} pages, '
@@ -231,6 +291,7 @@ class WriteRunner {
     List<PagePlan> plan,
     List<int> password,
     bool autoTry,
+    _Progress progress,
   ) async {
     final probe = plan.first;
 
@@ -251,7 +312,13 @@ class WriteRunner {
         '${direct.message}');
 
     // The tag is protected, or refuses writes outright. Try to authenticate.
-    for (final candidate in _candidates(password, autoTry)) {
+    final candidates = _candidates(password, autoTry);
+    for (var i = 0; i < candidates.length; i++) {
+      final candidate = candidates[i];
+      progress.emit(
+        WritePhase.authenticating,
+        'Trying passwords (${i + 1} of ${candidates.length})…',
+      );
       if (!await _pwdAuth(session, candidate)) {
         log.i('PWD_AUTH rejected ${formatHex(candidate)}');
         continue;
@@ -310,6 +377,7 @@ class WriteRunner {
     TagSession session,
     List<PagePlan> plan,
     List<PageOutcome> outcomes,
+    _Progress progress,
   ) async {
     final results = <PageOutcome>[];
     var sessionIsGone = false;
@@ -318,13 +386,20 @@ class WriteRunner {
       final outcome = outcomes[index];
       final entry = plan[index];
 
+      progress.emit(
+        WritePhase.verifying,
+        'Reading back to confirm (${index + 1} of ${outcomes.length})…',
+      );
+
       if (outcome.status != PageStatus.written) {
         results.add(outcome);
+        progress.done++;
         continue;
       }
 
       if (sessionIsGone) {
         results.add(_unverified(entry.page));
+        progress.done++;
         continue;
       }
 
@@ -335,11 +410,13 @@ class WriteRunner {
         if (e.kind != NfcErrorKind.comms) sessionIsGone = true;
         log.w('page ${entry.page} could not be verified: ${e.message}');
         results.add(_unverified(entry.page));
+        progress.done++;
         continue;
       }
 
       if (current.length < 4) {
         results.add(_unverified(entry.page));
+        progress.done++;
         continue;
       }
 
@@ -358,6 +435,8 @@ class WriteRunner {
           warning: 'data mismatch in page ${entry.page}',
         ));
       }
+      progress.done++;
+
     }
 
     return results;
