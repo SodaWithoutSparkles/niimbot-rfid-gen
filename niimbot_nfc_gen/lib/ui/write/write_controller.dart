@@ -44,13 +44,19 @@ class WriteController extends ChangeNotifier {
 
   late final List<RollPreset> presets = buildPresets();
 
+  /// Custom is entry 0, and it is the default: most people writing a tag want
+  /// their own roll, not the built-in 30307 profile.
   int presetIndex = 0;
 
   int mediaType = 1;
   int widthMm = 50;
   int heightMm = 30;
   int gapMm = 6;
-  int nominalQuantity = 230;
+
+  /// The largest quantity the tag can carry (a 1.2× usage limit has to fit in
+  /// 16 bits), so the default claims a whole roll rather than the 230 labels
+  /// of the 30307 profile.
+  int nominalQuantity = maxNominalQuantity;
 
   TagType tagType = TagType.ntag213;
   String uid = '';
@@ -81,8 +87,6 @@ class WriteController extends ChangeNotifier {
   final Map<String, String> fieldErrors = {};
 
   WriteController() {
-    // The roll profile is the default selection.
-    presetIndex = presets.indexWhere((p) => !p.isCustom && p.entry == null);
     revalidate();
   }
 

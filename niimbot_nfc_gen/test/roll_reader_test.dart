@@ -178,13 +178,17 @@ void main() {
       expect(await readRoll(tag), isA<RollNotRecognised>());
     });
 
-    test('an unreadable tag says so rather than crashing', () async {
+    test('an unreadable tag says so, and blames no one', () async {
       final tag = FakeTag.fromImage(referenceImage(),
           pageCount: 45, unreadable: true);
       final probe = await readRoll(tag);
 
       expect(probe, isA<RollNotRecognised>());
-      expect((probe as RollNotRecognised).reason, contains('Could not read'));
+      final reason = (probe as RollNotRecognised).reason;
+      expect(reason, contains('Could not read'));
+      // A real NIIMBOT roll reads the same way, so the message has to leave
+      // that possibility open.
+      expect(reason, contains('could be a genuine NIIMBOT tag'));
     });
 
     test('a payload belonging to another UID is rejected', () async {

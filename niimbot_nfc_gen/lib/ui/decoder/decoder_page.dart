@@ -64,7 +64,9 @@ class _DecoderPageState extends State<DecoderPage> {
             ),
           if (_result is RollNotRecognised)
             _Card(
-              title: 'Not a NIIMBOT roll tag',
+              // Not "not a roll tag": a genuine NIIMBOT roll reads exactly the
+              // same way, and the reason below says so.
+              title: 'No NIIMBOT roll data read from this tag',
               child: Text((_result! as RollNotRecognised).reason),
             ),
           if (_result is RollFound) _RollCard(info: (_result! as RollFound).info),

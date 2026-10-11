@@ -139,7 +139,15 @@ Future<RollProbe> readRoll(TagSession session) async {
   try {
     payload = await readPages(session, payloadStartPage, payloadPageCount);
   } on NfcException catch (e) {
-    return RollNotRecognised('Could not read the payload: ${e.message}');
+    // A genuine NIIMBOT roll does not hand its payload over. Its password is
+    // 0x12345678 and its pages stay locked, and the referenced raw nfc tool
+    // app only gets about 16 bytes back. So a read failure here says as much
+    // about the tag being real as it does about the tag being broken.
+    log.w('could not read the payload: ${e.message}');
+    return RollNotRecognised(
+      'Could not read the payload: ${e.message}. This could be a genuine '
+      'NIIMBOT tag, but this app cannot read it.',
+    );
   }
 
   // decodePayload throws on a bad CRC, which is the format test.

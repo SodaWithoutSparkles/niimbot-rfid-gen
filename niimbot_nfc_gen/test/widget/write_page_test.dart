@@ -7,7 +7,7 @@ import 'package:niimbot_nfc_gen/ui/decoder/decoder_page.dart';
 import 'package:niimbot_nfc_gen/ui/write/roll_form.dart';
 import 'package:niimbot_nfc_gen/ui/write/write_controller.dart';
 
-/// Custom is the first dropdown entry, so it is always visible.
+/// Custom is the default selection, so this only makes it explicit.
 Future<void> showCustom(WidgetTester tester) async {
   await tester.tap(find.byType(DropdownButtonFormField<int>).first);
   await tester.pumpAndSettle();
@@ -31,8 +31,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
   }
 
-  testWidgets('renders the roll form defaulted to the 50x30 profile',
-      (tester) async {
+  testWidgets('renders the roll form defaulted to Custom', (tester) async {
     useTallSurface(tester);
     await tester.pumpWidget(const NfcWriterApp());
     await tester.pumpAndSettle();
@@ -41,9 +40,11 @@ void main() {
     expect(find.text('Roll details'), findsOneWidget);
     expect(find.text('Tag'), findsOneWidget);
 
-    // The roll profile is preselected and its usage limit is derived.
-    expect(find.text('usage limit 276'), findsOneWidget);
-    expect(find.text('niimbot-30307-50x30'), findsOneWidget);
+    // Custom is preselected, so the fields are on screen and the quantity is
+    // the largest a tag can carry, not the 230 of the 30307 profile.
+    expect(find.text('custom'), findsOneWidget);
+    expect(find.text('usage limit 65534'), findsOneWidget);
+    expect(fieldFor(tester, 'Nominal quantity').initialValue, '54612');
   });
 
   testWidgets('the write button is disabled until a UID is entered',

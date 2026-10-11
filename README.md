@@ -75,6 +75,12 @@ is good.
 Open the menu (☰) → **Decoder** → **Scan tag**. You get the roll details, or a
 plain reason why the tag is not one of ours.
 
+**A genuine NIIMBOT roll will not read.** Its payload pages stay locked behind
+password `12345678`, and the referenced raw nfc tool app gets about 16 bytes back
+before the tag stops answering. This app reads page by page and cannot go past
+that, so a real roll comes back as a read failure rather than as roll details.
+The app says exactly that, rather than calling the tag broken.
+
 ### Reading the log
 
 The receipt icon in the app bar, or the menu → **Transaction log**. Every frame
