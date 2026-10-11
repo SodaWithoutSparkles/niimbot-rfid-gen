@@ -67,11 +67,14 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+        working-directory: niimbot_nfc_gen
 
       - name: Run tests
         run: flutter test
+        working-directory: niimbot_nfc_gen
 
       - name: Build all 4 APK variants
+        working-directory: niimbot_nfc_gen
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           BUILD_NUM="${{ github.run_number }}"
@@ -87,9 +90,9 @@ jobs:
           flutter build apk --release --split-per-abi \
             --build-name="$VERSION" \
             --build-number="$BUILD_NUM"
-          mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "app-${TAG}-arm64-v8a.apk"
-          mv build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "app-${TAG}-armeabi-v7a.apk"
-          mv build/app/outputs/flutter-apk/app-x86_64-release.apk "app-${TAG}-x86_64.apk"
+          mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "../app-${TAG}-arm64-v8a.apk"
+          mv build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "../app-${TAG}-armeabi-v7a.apk"
+          mv build/app/outputs/flutter-apk/app-x86_64-release.apk "../app-${TAG}-x86_64.apk"
 
       - name: Generate checksums
         run: |
