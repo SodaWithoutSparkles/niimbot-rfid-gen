@@ -1,0 +1,178 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - version.txt
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: |
+          ver="$(tr -d '[:space:]' < version.txt)"
+          if [ -z "$ver" ]; then
+            echo "::error::version.txt is empty"
+            exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "tag=v$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag does not exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::release $tag already exists; bump version.txt"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::tag $tag already exists; bump version.txt"
+            exit 1
+          fi
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build all 4 APK variants
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUILD_NUM="${{ github.run_number }}"
+          TAG="${{ steps.version.outputs.tag }}"
+
+          # 1. Build Universal APK (contains all ABIs)
+          flutter build apk --release \
+            --build-name="$VERSION" \
+            --build-number="$BUILD_NUM"
+          mv build/app/outputs/flutter-apk/app-release.apk "app-${TAG}-universal.apk"
+
+          # 2. Build the 3 ABI-split APKs (arm64-v8a, armeabi-v7a, x86_64)
+          flutter build apk --release --split-per-abi \
+            --build-name="$VERSION" \
+            --build-number="$BUILD_NUM"
+          mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "app-${TAG}-arm64-v8a.apk"
+          mv build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "app-${TAG}-armeabi-v7a.apk"
+          mv build/app/outputs/flutter-apk/app-x86_64-release.apk "app-${TAG}-x86_64.apk"
+
+      - name: Generate checksums
+        run: |
+          sha256sum app-${{ steps.version.outputs.tag }}-*.apk > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: apks-${{ steps.version.outputs.tag }}
+          path: |
+            app-${{ steps.version.outputs.tag }}-*.apk
+            SHA256SUMS
+          if-no-files-found: error
+
+      - name: Install git-cliff
+        uses: taiki-e/install-action@git-cliff
+
+      - name: Generate Changelog
+        env:
+          CURRENT_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          release_tag='^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$'
+
+          if [[ ! "$CURRENT_TAG" =~ $release_tag ]]; then
+            echo "::error::version.txt tag '$CURRENT_TAG' does not match $release_tag"
+            exit 1
+          fi
+
+          if [[ "$CURRENT_TAG" == *-* ]]; then
+            want_pre=true
+          else
+            want_pre=false
+          fi
+
+          previous=""
+          while IFS= read -r tag; do
+            if [[ ! "$tag" =~ $release_tag ]]; then
+              continue
+            fi
+            if [ "$tag" = "$CURRENT_TAG" ]; then
+              continue
+            fi
+            if ! git merge-base --is-ancestor "$tag" HEAD; then
+              continue
+            fi
+            if [[ "$tag" == *-* ]]; then
+              is_pre=true
+            else
+              is_pre=false
+            fi
+            if [ "$is_pre" = "$want_pre" ]; then
+              if [ "$(printf '%s\n%s\n' "$CURRENT_TAG" "$tag" | sort -V | tail -n1)" = "$tag" ]; then
+                echo "::error::tag $tag is newer than $CURRENT_TAG; is version.txt correct?"
+                exit 1
+              fi
+              previous="$tag"
+              break
+            fi
+          done < <(git tag --list --sort=-v:refname)
+
+          if [ -n "$previous" ]; then
+            echo "Changelog range: $previous..HEAD"
+            git-cliff \
+              --config cliff.toml \
+              "$previous..HEAD" \
+              --tag "$CURRENT_TAG" \
+              --output CHANGELOG.md
+          else
+            echo "No previous tag in this release class; using full history"
+            git-cliff \
+              --config cliff.toml \
+              --tag "$CURRENT_TAG" \
+              --output CHANGELOG.md
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --notes-file CHANGELOG.md \
+            app-${{ steps.version.outputs.tag }}-*.apk \
+            SHA256SUMS
